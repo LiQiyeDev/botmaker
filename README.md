@@ -24,9 +24,3 @@ The root `pom.xml` is a Maven aggregator that builds the SDK then the Studio in 
 mvn install          # build both modules (SDK first)
 mvn -pl botmaker-studio javafx:run   # run the Studio
 ```
-
-## Working on the SDK
-
-Edit the SDK under `botmaker-sdk/`, commit **inside that submodule**, then bump the SDK
-submodule pointer here in the umbrella repo. `mvn install` puts the SDK in your local Maven
-repo (checked before JitPack) so Studio and generated projects resolve local changes.
