@@ -1,0 +1,9 @@
+[submodule "botmaker-sdk"]
+	path = botmaker-sdk
+	url = https://github.com/LiQiyeDev/botmaker-sdk
+[submodule "botmaker-studio"]
+	path = botmaker-studio
+	url = git@github.com:LiQiyeDev/botmaker-studio.git
+[submodule "botmaker-gallery"]
+	path = botmaker-gallery
+	url = https://github.com/LiQiyeDev/botmaker-gallery
