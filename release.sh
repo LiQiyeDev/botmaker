@@ -28,6 +28,11 @@
 # Notes:
 #   * `--all [level]` is shorthand for setting all three modules to that level (default `patch`);
 #     an explicit `--shared/--sdk/--studio` still overrides the corresponding one.
+#   * Change detection: a module whose HEAD is identical to its latest tag is SKIPPED (nothing new to
+#     release) — so `--all` won't cut empty tags for modules that haven't changed. A module is still
+#     released when it has real changes, when an explicit version is given, or when an upstream module
+#     in the same run edits its pom (a shared release re-pins sdk/studio; an sdk release bumps studio's
+#     fallback). Tagging is idempotent, so an interrupted release can be re-run safely.
 #   * Tags are `v<version>` (matching the existing studio tags; the sdk's bare `1.0.x` tags still work
 #     for JitPack, but we standardise on `v` here — JitPack resolves either).
 #   * When --shared is part of the release, the script waits for shared's JitPack build to go green
@@ -150,6 +155,31 @@ resolve_version() {
   bump "$cur" "$spec"
 }
 
+# has_changes <mod> — true (0) if the module has something new to release: no prior tag, or its HEAD
+# tree differs from its latest release tag. Returns false (1) only when HEAD is byte-identical to the
+# latest tag (nothing to release).
+has_changes() {
+  local dir="$ROOT/$1" last; last="$(latest_version "$1")"
+  [[ -z "$last" ]] && return 0                     # never released -> release it
+  local t
+  for t in "v$last" "$last"; do                    # tags may be v-prefixed or bare
+    if git -C "$dir" rev-parse -q --verify "refs/tags/$t^{commit}" >/dev/null 2>&1; then
+      git -C "$dir" diff --quiet "$t" HEAD -- && return 1 || return 0
+    fi
+  done
+  return 0
+}
+
+# should_release <mod> <spec> <forced> — decide whether to cut a tag. An explicit version or a forced
+# release (an upstream module in this run edits this pom) always releases; a bump-level spec releases
+# only when has_changes says there is something new.
+should_release() {
+  local mod="$1" spec="$2" forced="$3"
+  [[ "$forced" == "1" ]] && return 0
+  [[ "$spec" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && return 0
+  has_changes "$mod"
+}
+
 # Rewrite <botmaker.shared.version>…</…> in a module's pom.
 set_shared_property() {
   local dir="$ROOT/$1" ver="$2"
@@ -162,7 +192,8 @@ commit_tag_push() {
   if [[ -n "$msg" ]]; then
     run bash -c "git -C '$dir' diff --quiet || git -C '$dir' commit -am '$msg'"
   fi
-  run git -C "$dir" tag "v$ver"
+  # idempotent: don't fail if the tag already exists (e.g. resuming an interrupted release).
+  run bash -c "git -C '$dir' rev-parse -q --verify 'refs/tags/v$ver' >/dev/null || git -C '$dir' tag 'v$ver'"
   run git -C "$dir" push origin HEAD
   run git -C "$dir" push origin "v$ver"
 }
@@ -201,24 +232,35 @@ info "Release plan:"
 [[ -n "$SDK_VER"    ]] && echo "    sdk    : $SDK_SPEC -> v$SDK_VER"
 [[ -n "$STUDIO_VER" ]] && echo "    studio : $STUDIO_SPEC -> v$STUDIO_VER"
 
+# A skipped module has its *_VER cleared, so downstream pom-pins and the pointer commit ignore it.
+
 # ---- 1) shared ----
 if [[ -n "$SHARED_VER" ]]; then
-  info "Releasing botmaker-shared v$SHARED_VER"
-  commit_tag_push botmaker-shared "$SHARED_VER" ""     # no pom edit — its own version is cosmetic
-  wait_for_jitpack botmaker-shared "v$SHARED_VER"
+  if should_release botmaker-shared "$SHARED_SPEC" 0; then
+    info "Releasing botmaker-shared v$SHARED_VER"
+    commit_tag_push botmaker-shared "$SHARED_VER" ""   # no pom edit — its own version is cosmetic
+    wait_for_jitpack botmaker-shared "v$SHARED_VER"
+  else
+    info "botmaker-shared: no changes since its latest tag — skipping"; SHARED_VER=""
+  fi
 fi
 
-# ---- 2) sdk ----
+# ---- 2) sdk ----  (forced when shared released this run: its pom's shared.version must change)
 if [[ -n "$SDK_VER" ]]; then
-  info "Releasing botmaker-sdk v$SDK_VER"
-  [[ -n "$SHARED_VER" ]] && set_shared_property botmaker-sdk "v$SHARED_VER"
-  commit_tag_push botmaker-sdk "$SDK_VER" \
-    "$([[ -n "$SHARED_VER" ]] && echo "chore: bump botmaker.shared.version -> v$SHARED_VER")"
-  wait_for_jitpack botmaker-sdk "v$SDK_VER"
+  if should_release botmaker-sdk "$SDK_SPEC" "$([[ -n "$SHARED_VER" ]] && echo 1 || echo 0)"; then
+    info "Releasing botmaker-sdk v$SDK_VER"
+    [[ -n "$SHARED_VER" ]] && set_shared_property botmaker-sdk "v$SHARED_VER"
+    commit_tag_push botmaker-sdk "$SDK_VER" \
+      "$([[ -n "$SHARED_VER" ]] && echo "chore: bump botmaker.shared.version -> v$SHARED_VER")"
+    wait_for_jitpack botmaker-sdk "v$SDK_VER"
+  else
+    info "botmaker-sdk: no changes since its latest tag — skipping"; SDK_VER=""
+  fi
 fi
 
-# ---- 3) studio ----
+# ---- 3) studio ----  (forced when shared or sdk released this run: its pom/fallback must change)
 if [[ -n "$STUDIO_VER" ]]; then
+ if should_release botmaker-studio "$STUDIO_SPEC" "$([[ -n "$SHARED_VER$SDK_VER" ]] && echo 1 || echo 0)"; then
   info "Releasing botmaker-studio v$STUDIO_VER"
   [[ -n "$SHARED_VER" ]] && set_shared_property botmaker-studio "v$SHARED_VER"
   # New bots should default to the just-released SDK.
@@ -227,6 +269,9 @@ if [[ -n "$STUDIO_VER" ]]; then
       '$ROOT/botmaker-studio/src/main/java/com/botmaker/studio/services/MavenService.java'"
   fi
   commit_tag_push botmaker-studio "$STUDIO_VER" "release: studio v$STUDIO_VER"
+ else
+  info "botmaker-studio: no changes since its latest tag — skipping"; STUDIO_VER=""
+ fi
 fi
 
 # ---- 4) record moved submodule pointers in the umbrella ----
