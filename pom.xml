@@ -10,12 +10,13 @@
     <packaging>pom</packaging>
 
     <!--
-      Umbrella (aggregator) build. botmaker-sdk and botmaker-studio are git submodules
-      (see .gitmodules). Listing the SDK first makes the reactor build it before the
-      Studio, so a `mvn install` at this root builds both in dependency order.
-      Per-module dependencies, plugins and profiles live in each submodule's own pom.
+      Umbrella (aggregator) build. botmaker-shared, botmaker-sdk and botmaker-studio are git
+      submodules (see .gitmodules). Listing botmaker-shared first (then the SDK) makes the reactor
+      build dependencies before their consumers, so a `mvn install` at this root builds all three in
+      dependency order. Per-module dependencies, plugins and profiles live in each submodule's own pom.
     -->
     <modules>
+        <module>botmaker-shared</module>
         <module>botmaker-sdk</module>
         <module>botmaker-studio</module>
     </modules>
