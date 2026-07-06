@@ -7,3 +7,6 @@
 [submodule "botmaker-gallery"]
 	path = botmaker-gallery
 	url = https://github.com/LiQiyeDev/botmaker-gallery
+[submodule "botmaker-shared"]
+	path = botmaker-shared
+	url = git@github.com:LiQiyeDev/botmaker-shared.git
