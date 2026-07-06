@@ -9,12 +9,25 @@
 # property in the sdk/studio poms — this script bumps it to the released shared tag and tags each
 # module in order.
 #
+# Each module flag takes an OPTIONAL argument:
+#   * an explicit version   — `--sdk 1.0.7`                (tag exactly that)
+#   * a bump level          — `--sdk minor`               (patch|minor|major from its latest tag)
+#   * nothing at all        — `--sdk`                      (defaults to a `patch` bump)
+# Auto-increment reads the module's own git tags (fetched from origin), strips a leading `v`, takes the
+# highest semver, and bumps it. With no existing tag, it bumps from 0.0.0 (so patch->0.0.1 etc.).
+#
 # Usage:
-#   ./release.sh --shared 1.1.0 --sdk 1.0.7 --studio 1.0.7   # any subset of the three
-#   ./release.sh --sdk 1.0.7                                 # e.g. an SDK-only release
-#   ./release.sh --shared 1.1.0 --dry-run                    # print everything, change nothing
+#   ./release.sh --all                          # patch-bump + release all three, in order
+#   ./release.sh --all minor                    # minor-bump all three
+#   ./release.sh --shared --sdk --studio        # same as --all (each patch-bumps)
+#   ./release.sh --shared 1.1.0 --sdk 1.0.7 --studio 1.0.7   # explicit versions, any subset
+#   ./release.sh --sdk                          # SDK-only patch bump
+#   ./release.sh --sdk minor                    # SDK-only minor bump
+#   ./release.sh --all --dry-run                # print everything (incl. computed versions), change nothing
 #
 # Notes:
+#   * `--all [level]` is shorthand for setting all three modules to that level (default `patch`);
+#     an explicit `--shared/--sdk/--studio` still overrides the corresponding one.
 #   * Tags are `v<version>` (matching the existing studio tags; the sdk's bare `1.0.x` tags still work
 #     for JitPack, but we standardise on `v` here — JitPack resolves either).
 #   * When --shared is part of the release, the script waits for shared's JitPack build to go green
@@ -27,11 +40,22 @@ set -euo pipefail
 OWNER="LiQiyeDev"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# *_SPEC hold the raw request per module ("" = not releasing): an explicit version, or a bump level
+# (patch|minor|major). They are resolved to concrete *_VER numbers after tags are fetched.
+SHARED_SPEC="" ; SDK_SPEC="" ; STUDIO_SPEC=""
 SHARED_VER="" ; SDK_VER="" ; STUDIO_VER=""
 DRY_RUN=0
 
 die()  { echo "error: $*" >&2; exit 1; }
 info() { echo -e "\033[1;34m==>\033[0m $*"; }
+
+# take_optional <next-arg> — decide whether a module flag consumed a value. Sets globals:
+#   OPT_VAL     the value (the next arg, or "patch" when none/another flag follows)
+#   OPT_SHIFT   how many positions to shift (2 if a value was consumed, else 1)
+take_optional() {
+  if [[ -n "${1:-}" && "$1" != -* ]]; then OPT_VAL="$1"; OPT_SHIFT=2
+  else OPT_VAL="patch"; OPT_SHIFT=1; fi
+}
 
 # run <cmd...> — echo, then execute unless --dry-run.
 run() {
@@ -51,17 +75,26 @@ usage() {
 
 # ---- parse args ----
 [[ $# -gt 0 ]] || usage 1
+ALL_SPEC=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --shared) SHARED_VER="${2:?--shared needs a version}"; shift 2 ;;
-    --sdk)    SDK_VER="${2:?--sdk needs a version}";        shift 2 ;;
-    --studio) STUDIO_VER="${2:?--studio needs a version}";  shift 2 ;;
+    --all)    take_optional "${2:-}"; ALL_SPEC="$OPT_VAL";    shift "$OPT_SHIFT" ;;
+    --shared) take_optional "${2:-}"; SHARED_SPEC="$OPT_VAL"; shift "$OPT_SHIFT" ;;
+    --sdk)    take_optional "${2:-}"; SDK_SPEC="$OPT_VAL";    shift "$OPT_SHIFT" ;;
+    --studio) take_optional "${2:-}"; STUDIO_SPEC="$OPT_VAL"; shift "$OPT_SHIFT" ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage 0 ;;
     *) die "unknown arg: $1 (see --help)" ;;
   esac
 done
-[[ -n "$SHARED_VER$SDK_VER$STUDIO_VER" ]] || die "nothing to release (pass --shared/--sdk/--studio)"
+
+# --all seeds every module that wasn't set explicitly (an explicit flag wins).
+if [[ -n "$ALL_SPEC" ]]; then
+  [[ -z "$SHARED_SPEC" ]] && SHARED_SPEC="$ALL_SPEC"
+  [[ -z "$SDK_SPEC"    ]] && SDK_SPEC="$ALL_SPEC"
+  [[ -z "$STUDIO_SPEC" ]] && STUDIO_SPEC="$ALL_SPEC"
+fi
+[[ -n "$SHARED_SPEC$SDK_SPEC$STUDIO_SPEC" ]] || die "nothing to release (pass --all or --shared/--sdk/--studio)"
 
 [[ -f "$ROOT/pom.xml" ]] && grep -q '<artifactId>BotMaker</artifactId>' "$ROOT/pom.xml" \
   || die "must be run from the botmaker umbrella root"
@@ -83,6 +116,38 @@ preflight() {
     [[ $DRY_RUN -eq 1 ]] && info "$mod: detached HEAD (ok in dry-run)" \
       || die "$mod: detached HEAD — 'git -C $mod checkout main' first"
   fi
+}
+
+# latest_version <mod> — highest semver among the module's git tags (leading `v` stripped), or "".
+# Fetches tags from origin first so auto-increment sees released tags, not just local ones.
+latest_version() {
+  local dir="$ROOT/$1"
+  git -C "$dir" fetch --tags --quiet origin 2>/dev/null || true
+  git -C "$dir" tag --list \
+    | sed -E 's/^v//' \
+    | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+    | sort -V | tail -1
+}
+
+# bump <version> <patch|minor|major> — echo the incremented version.
+bump() {
+  local IFS=. ; read -r ma mi pa <<<"$1"
+  case "$2" in
+    major) echo "$((ma+1)).0.0" ;;
+    minor) echo "$ma.$((mi+1)).0" ;;
+    patch) echo "$ma.$mi.$((pa+1))" ;;
+    *) die "unknown bump level '$2'" ;;
+  esac
+}
+
+# resolve_version <mod> <spec> — a literal x.y.z passes through; a bump level is applied to the
+# module's latest tag (0.0.0 when it has none).
+resolve_version() {
+  local mod="$1" spec="$2"
+  if [[ "$spec" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "$spec"; return; fi
+  case "$spec" in patch|minor|major) ;; *) die "$mod: bad version/level '$spec' (want x.y.z or patch|minor|major)" ;; esac
+  local cur; cur="$(latest_version "$mod")"; [[ -z "$cur" ]] && cur="0.0.0"
+  bump "$cur" "$spec"
 }
 
 # Rewrite <botmaker.shared.version>…</…> in a module's pom.
@@ -123,9 +188,18 @@ wait_for_jitpack() {
 }
 
 # ---- preflight all targeted modules up front ----
-[[ -n "$SHARED_VER" ]] && preflight botmaker-shared
-[[ -n "$SDK_VER"    ]] && preflight botmaker-sdk
-[[ -n "$STUDIO_VER" ]] && preflight botmaker-studio
+[[ -n "$SHARED_SPEC" ]] && preflight botmaker-shared
+[[ -n "$SDK_SPEC"    ]] && preflight botmaker-sdk
+[[ -n "$STUDIO_SPEC" ]] && preflight botmaker-studio
+
+# ---- resolve specs (explicit or bump level) into concrete versions, then show the plan ----
+[[ -n "$SHARED_SPEC" ]] && SHARED_VER="$(resolve_version botmaker-shared "$SHARED_SPEC")"
+[[ -n "$SDK_SPEC"    ]] && SDK_VER="$(resolve_version botmaker-sdk    "$SDK_SPEC")"
+[[ -n "$STUDIO_SPEC" ]] && STUDIO_VER="$(resolve_version botmaker-studio "$STUDIO_SPEC")"
+info "Release plan:"
+[[ -n "$SHARED_VER" ]] && echo "    shared : $SHARED_SPEC -> v$SHARED_VER"
+[[ -n "$SDK_VER"    ]] && echo "    sdk    : $SDK_SPEC -> v$SDK_VER"
+[[ -n "$STUDIO_VER" ]] && echo "    studio : $STUDIO_SPEC -> v$STUDIO_VER"
 
 # ---- 1) shared ----
 if [[ -n "$SHARED_VER" ]]; then
