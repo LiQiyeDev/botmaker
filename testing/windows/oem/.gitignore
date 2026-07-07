@@ -1,0 +1,3 @@
+# Guest-generated logs and any locally-dropped installer are not tracked.
+*.log
+*.msi

@@ -1,0 +1,25 @@
+services:
+  windows:
+    image: dockurr/windows
+    container_name: windows
+    environment:
+      VERSION: "11"
+    devices:
+      - /dev/kvm
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "8006:8006"
+      - "3389:3389/tcp"
+      - "3389:3389/udp"
+    volumes:
+      - ~/vms/windows-storage:/storage
+      # Files here are copied into the guest at C:\OEM and `install.bat` is run once,
+      # right after Windows finishes installing — it installs BotMaker Studio.
+      # Which build it installs is set inside oem/install.ps1 (default: latest release).
+      - ./oem:/oem
+    restart: always
+    stop_grace_period: 2m
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
