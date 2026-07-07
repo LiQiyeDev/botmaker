@@ -149,7 +149,11 @@ Then `installer` on one deb distro (ubuntu/debian) and fedora (rpm) to validate 
 
 ## Not covered here
 
-Automated GUI assertions. Studio currently has only headless JUnit logic tests. A TestFX + Monocle
-smoke test (app launches, main window/dialogs render) could run inside these same containers as a
-later addition, but it would not exercise the X11-vs-Wayland native gap — manual testing remains the
-way to validate that.
+The **X11-vs-Wayland native gap** in `botmaker-shared` (window enumerate/capture/focus/input) — that
+genuinely needs a real display server, so this manual harness remains the way to validate it.
+
+Automated **JavaFX UI** assertions, on the other hand, no longer need this harness (or any display):
+`botmaker-studio` now has headless **TestFX + Monocle** tests (`src/test/java/com/botmaker/studio/ui/fx/`,
+run with a plain `mvn -pl botmaker-studio test`, no `DISPLAY` required). They cover Studio's scene-graph
+layer — screens/dialogs render, controls respond to real clicks/keystrokes — but by construction do
+**not** exercise the native window gap above.

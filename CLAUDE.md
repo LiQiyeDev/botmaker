@@ -58,16 +58,25 @@ It does **not** touch any module's own `<version>` — JitPack owns that.
 
 ## Local dev — `dev-install.sh` (no tag push)
 
-Each library has a `dev-install.sh` so you can test local changes without pushing a git tag (the `~/.m2`
-local repo is checked before JitPack):
+To test local changes without pushing a git tag (the `~/.m2` local repo is checked before JitPack), run the
+umbrella **`./dev-install.sh`** — it installs both library builds in dependency order. There are also
+per-module scripts:
 
-- **`botmaker-sdk/dev-install.sh`** — installs the SDK (and reinstalls shared) into `~/.m2` under
-  `com.github.LiQiyeDev:botmaker-sdk:local-SNAPSHOT` (a plain `mvn install` would use the wrong
-  `com.botmaker.sdk` coordinate, so a bot wouldn't see it). Then set the bot's SDK version to
-  `local-SNAPSHOT` (Studio's version field is editable).
 - **`botmaker-shared/dev-install.sh`** — installs shared at `0.0.0-SNAPSHOT` (its groupId already matches
   JitPack, so no rename needed); that's the version every consumer defaults to via
   `${botmaker.shared.version}`, so the SDK build, Studio, and bots pick it up immediately.
+- **`botmaker-sdk/dev-install.sh`** — reinstalls shared, then installs the SDK into `~/.m2` under
+  `com.github.LiQiyeDev:botmaker-sdk:local-SNAPSHOT` (a plain `mvn install` would use the wrong
+  `com.botmaker.sdk` coordinate, so a bot wouldn't see it). It also rewrites `botmaker.shared.version` →
+  `0.0.0-SNAPSHOT` in its temp pom (restored on exit), so the local SDK build depends on the **local** shared
+  build above — otherwise, after a release, the committed property pins a real tag (e.g. `v0.0.2`) and your
+  local shared changes would be ignored.
+
+**Selecting the local SDK build in Studio:** you no longer type the version. Studio scans `~/.m2` for
+locally-installed SDK `*-SNAPSHOT` builds (`MavenService.localSdkVersions()`) and auto-lists them at the top of
+the SDK version dropdown — both in **New Project** and **Project ▸ Manage Libraries** — labeled `(local build)`
+and preselected when present. shared isn't user-selectable (it's a transitive dep of the SDK); the dev-install
+property rewrite is what routes a local SDK build to your local shared.
 
 Local-only — users select real released versions and never resolve these. Detail in each module's `CLAUDE.md`.
 
