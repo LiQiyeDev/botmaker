@@ -180,12 +180,6 @@ should_release() {
   has_changes "$mod"
 }
 
-# Rewrite <botmaker.shared.version>…</…> in a module's pom.
-set_shared_property() {
-  local dir="$ROOT/$1" ver="$2"
-  run_sh "sed -i -E 's#(<botmaker\\.shared\\.version>)[^<]*(</botmaker\\.shared\\.version>)#\\1${ver}\\2#' '$dir/pom.xml'"
-}
-
 # Commit (if there is anything to commit) and tag+push a module.
 commit_tag_push() {
   local mod="$1" dir="$ROOT/$1" ver="$2" msg="$3"
@@ -249,9 +243,10 @@ fi
 if [[ -n "$SDK_VER" ]]; then
   if should_release botmaker-sdk "$SDK_SPEC" "$([[ -n "$SHARED_VER" ]] && echo 1 || echo 0)"; then
     info "Releasing botmaker-sdk v$SDK_VER"
-    [[ -n "$SHARED_VER" ]] && set_shared_property botmaker-sdk "v$SHARED_VER"
-    commit_tag_push botmaker-sdk "$SDK_VER" \
-      "$([[ -n "$SHARED_VER" ]] && echo "chore: bump botmaker.shared.version -> v$SHARED_VER")"
+    # No pom edit: the committed botmaker.shared.version stays 0.0.0-SNAPSHOT; jitpack.yml injects the
+    # newest shared tag at build time via -D. A fresh SDK tag is still cut when shared changed so JitPack
+    # rebuilds the SDK against the new shared (its build cache is per-tag).
+    commit_tag_push botmaker-sdk "$SDK_VER" ""
     wait_for_jitpack botmaker-sdk "v$SDK_VER"
   else
     info "botmaker-sdk: no changes since its latest tag — skipping"; SDK_VER=""
@@ -262,8 +257,8 @@ fi
 if [[ -n "$STUDIO_VER" ]]; then
  if should_release botmaker-studio "$STUDIO_SPEC" "$([[ -n "$SHARED_VER$SDK_VER" ]] && echo 1 || echo 0)"; then
   info "Releasing botmaker-studio v$STUDIO_VER"
-  [[ -n "$SHARED_VER" ]] && set_shared_property botmaker-studio "v$SHARED_VER"
-  # New bots should default to the just-released SDK.
+  # No shared.version pom edit: studio's pom stays 0.0.0-SNAPSHOT; its release.yml injects the newest shared
+  # tag at build time via -D. New bots should still default to the just-released SDK (a .java constant).
   if [[ -n "$SDK_VER" ]]; then
     run_sh "sed -i -E 's#(SDK_FALLBACK_VERSION = \")[^\"]*(\")#\\1${SDK_VER}\\2#' \
       '$ROOT/botmaker-studio/src/main/java/com/botmaker/studio/services/MavenService.java'"
