@@ -10,3 +10,6 @@
 [submodule "botmaker-shared"]
 	path = botmaker-shared
 	url = git@github.com:LiQiyeDev/botmaker-shared.git
+[submodule "botmaker-pilot"]
+	path = botmaker-pilot
+	url = git@github.com:LiQiyeDev/botmaker-pilot.git
