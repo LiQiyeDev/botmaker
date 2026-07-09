@@ -13,7 +13,9 @@
 # It has no pom pinning and no dependency ordering — tagging it simply triggers its own GitHub Actions
 # workflow (release-apk.yml) which builds the Android APK and attaches it to the GitHub Release as
 # `botpilot.apk`. Studio's Remote Pilot dialog links the stable `releases/latest/download/botpilot.apk`
-# permalink, so cutting a pilot release is how a new APK reaches phones. Released independently below.
+# permalink, so cutting a pilot release is how a new APK reaches phones. Because it has no dependency on
+# the library chain, it is tagged FIRST so its APK build runs in parallel with the shared/sdk JitPack
+# waits instead of queueing behind them.
 #
 # Each module flag takes an OPTIONAL argument:
 #   * an explicit version   — `--sdk 1.0.7`                (tag exactly that)
@@ -243,7 +245,22 @@ info "Release plan:"
 
 # A skipped module has its *_VER cleared, so downstream pom-pins and the pointer commit ignore it.
 
-# ---- 1) shared ----
+# ---- 1) pilot ----  (independent: no pom pin, no JitPack, no dependency on the library chain — so it
+# is tagged FIRST, letting its GitHub Actions APK build (release-apk.yml) run in parallel with the
+# shared/sdk JitPack waits below rather than queueing behind them.)
+if [[ -n "$PILOT_VER" ]]; then
+  if should_release botmaker-pilot "$PILOT_SPEC" 0; then
+    info "Releasing botmaker-pilot v$PILOT_VER"
+    # No pom/version edit — pilot isn't a Maven artifact. Pushing the tag fires the GitHub Actions
+    # release-apk.yml, which builds and attaches botpilot.apk to the v$PILOT_VER GitHub Release.
+    commit_tag_push botmaker-pilot "$PILOT_VER" ""
+    info "botmaker-pilot v$PILOT_VER tagged — its CI builds + publishes botpilot.apk (runs in parallel)."
+  else
+    info "botmaker-pilot: no changes since its latest tag — skipping"; PILOT_VER=""
+  fi
+fi
+
+# ---- 2) shared ----
 if [[ -n "$SHARED_VER" ]]; then
   if should_release botmaker-shared "$SHARED_SPEC" 0; then
     info "Releasing botmaker-shared v$SHARED_VER"
@@ -254,7 +271,7 @@ if [[ -n "$SHARED_VER" ]]; then
   fi
 fi
 
-# ---- 2) sdk ----  (forced when shared released this run: its pom's shared.version must change)
+# ---- 3) sdk ----  (forced when shared released this run: its pom's shared.version must change)
 if [[ -n "$SDK_VER" ]]; then
   if should_release botmaker-sdk "$SDK_SPEC" "$([[ -n "$SHARED_VER" ]] && echo 1 || echo 0)"; then
     info "Releasing botmaker-sdk v$SDK_VER"
@@ -268,7 +285,7 @@ if [[ -n "$SDK_VER" ]]; then
   fi
 fi
 
-# ---- 3) studio ----  (forced when shared or sdk released this run: its pom/fallback must change)
+# ---- 4) studio ----  (forced when shared or sdk released this run: its pom/fallback must change)
 if [[ -n "$STUDIO_VER" ]]; then
  if should_release botmaker-studio "$STUDIO_SPEC" "$([[ -n "$SHARED_VER$SDK_VER" ]] && echo 1 || echo 0)"; then
   info "Releasing botmaker-studio v$STUDIO_VER"
@@ -282,19 +299,6 @@ if [[ -n "$STUDIO_VER" ]]; then
  else
   info "botmaker-studio: no changes since its latest tag — skipping"; STUDIO_VER=""
  fi
-fi
-
-# ---- 4) pilot ----  (independent: no pom pin, no JitPack; the tag triggers release-apk.yml → APK)
-if [[ -n "$PILOT_VER" ]]; then
-  if should_release botmaker-pilot "$PILOT_SPEC" 0; then
-    info "Releasing botmaker-pilot v$PILOT_VER"
-    # No pom/version edit — pilot isn't a Maven artifact. Pushing the tag fires the GitHub Actions
-    # release-apk.yml, which builds and attaches botpilot.apk to the v$PILOT_VER GitHub Release.
-    commit_tag_push botmaker-pilot "$PILOT_VER" ""
-    info "botmaker-pilot v$PILOT_VER tagged — its CI builds + publishes botpilot.apk to the release."
-  else
-    info "botmaker-pilot: no changes since its latest tag — skipping"; PILOT_VER=""
-  fi
 fi
 
 # ---- 5) record moved submodule pointers in the umbrella ----
