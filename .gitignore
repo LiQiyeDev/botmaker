@@ -2,4 +2,4 @@ target/
 .idea/
 *.iml
 
-repomix-output.xml
+repomix-output-sdk.xml
