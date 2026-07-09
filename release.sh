@@ -2,12 +2,18 @@
 #
 # release.sh — cut a coordinated, dependency-ordered release of the BotMaker submodules.
 #
-# The submodules form the chain  shared -> sdk -> studio.  JitPack owns each module's OWN version
-# (it serves every git tag as com.github.LiQiyeDev:<repo>:<tag>, ignoring the pom version), so this
-# script does NOT touch any module's <version>.  What JitPack does NOT rewrite is a build's
+# The library submodules form the chain  shared -> sdk -> studio.  JitPack owns each module's OWN
+# version (it serves every git tag as com.github.LiQiyeDev:<repo>:<tag>, ignoring the pom version), so
+# this script does NOT touch any module's <version>.  What JitPack does NOT rewrite is a build's
 # dependencies, so the one cross-module thing that must be managed is the `botmaker.shared.version`
 # property in the sdk/studio poms — this script bumps it to the released shared tag and tags each
 # module in order.
+#
+# botmaker-pilot is the odd one out: it's a CLIENT APP, not a JitPack library and not in the reactor.
+# It has no pom pinning and no dependency ordering — tagging it simply triggers its own GitHub Actions
+# workflow (release-apk.yml) which builds the Android APK and attaches it to the GitHub Release as
+# `botpilot.apk`. Studio's Remote Pilot dialog links the stable `releases/latest/download/botpilot.apk`
+# permalink, so cutting a pilot release is how a new APK reaches phones. Released independently below.
 #
 # Each module flag takes an OPTIONAL argument:
 #   * an explicit version   — `--sdk 1.0.7`                (tag exactly that)
@@ -17,17 +23,20 @@
 # highest semver, and bumps it. With no existing tag, it bumps from 0.0.0 (so patch->0.0.1 etc.).
 #
 # Usage:
-#   ./release.sh --all                          # patch-bump + release all three, in order
-#   ./release.sh --all minor                    # minor-bump all three
-#   ./release.sh --shared --sdk --studio        # same as --all (each patch-bumps)
+#   ./release.sh --all                          # patch-bump + release all modules that changed
+#   ./release.sh --all minor                    # minor-bump them all
+#   ./release.sh --shared --sdk --studio        # the library chain (each patch-bumps)
 #   ./release.sh --shared 1.1.0 --sdk 1.0.7 --studio 1.0.7   # explicit versions, any subset
 #   ./release.sh --sdk                          # SDK-only patch bump
 #   ./release.sh --sdk minor                    # SDK-only minor bump
+#   ./release.sh --pilot                         # pilot-only patch bump (tags -> builds + publishes the APK)
+#   ./release.sh --pilot 0.2.0                   # pilot at an explicit version
 #   ./release.sh --all --dry-run                # print everything (incl. computed versions), change nothing
 #
 # Notes:
-#   * `--all [level]` is shorthand for setting all three modules to that level (default `patch`);
-#     an explicit `--shared/--sdk/--studio` still overrides the corresponding one.
+#   * `--all [level]` is shorthand for setting every module (shared/sdk/studio/pilot) to that level
+#     (default `patch`); an explicit `--shared/--sdk/--studio/--pilot` still overrides the corresponding
+#     one. Unchanged modules are skipped, so `--all` won't cut empty tags.
 #   * Change detection: a module whose HEAD is identical to its latest tag is SKIPPED (nothing new to
 #     release) — so `--all` won't cut empty tags for modules that haven't changed. A module is still
 #     released when it has real changes, when an explicit version is given, or when an upstream module
@@ -47,8 +56,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # *_SPEC hold the raw request per module ("" = not releasing): an explicit version, or a bump level
 # (patch|minor|major). They are resolved to concrete *_VER numbers after tags are fetched.
-SHARED_SPEC="" ; SDK_SPEC="" ; STUDIO_SPEC=""
-SHARED_VER="" ; SDK_VER="" ; STUDIO_VER=""
+SHARED_SPEC="" ; SDK_SPEC="" ; STUDIO_SPEC="" ; PILOT_SPEC=""
+SHARED_VER="" ; SDK_VER="" ; STUDIO_VER="" ; PILOT_VER=""
 DRY_RUN=0
 
 die()  { echo "error: $*" >&2; exit 1; }
@@ -87,6 +96,7 @@ while [[ $# -gt 0 ]]; do
     --shared) take_optional "${2:-}"; SHARED_SPEC="$OPT_VAL"; shift "$OPT_SHIFT" ;;
     --sdk)    take_optional "${2:-}"; SDK_SPEC="$OPT_VAL";    shift "$OPT_SHIFT" ;;
     --studio) take_optional "${2:-}"; STUDIO_SPEC="$OPT_VAL"; shift "$OPT_SHIFT" ;;
+    --pilot)  take_optional "${2:-}"; PILOT_SPEC="$OPT_VAL";  shift "$OPT_SHIFT" ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage 0 ;;
     *) die "unknown arg: $1 (see --help)" ;;
@@ -98,8 +108,10 @@ if [[ -n "$ALL_SPEC" ]]; then
   [[ -z "$SHARED_SPEC" ]] && SHARED_SPEC="$ALL_SPEC"
   [[ -z "$SDK_SPEC"    ]] && SDK_SPEC="$ALL_SPEC"
   [[ -z "$STUDIO_SPEC" ]] && STUDIO_SPEC="$ALL_SPEC"
+  [[ -z "$PILOT_SPEC"  ]] && PILOT_SPEC="$ALL_SPEC"
 fi
-[[ -n "$SHARED_SPEC$SDK_SPEC$STUDIO_SPEC" ]] || die "nothing to release (pass --all or --shared/--sdk/--studio)"
+[[ -n "$SHARED_SPEC$SDK_SPEC$STUDIO_SPEC$PILOT_SPEC" ]] \
+  || die "nothing to release (pass --all or --shared/--sdk/--studio/--pilot)"
 
 [[ -f "$ROOT/pom.xml" ]] && grep -q '<artifactId>BotMaker</artifactId>' "$ROOT/pom.xml" \
   || die "must be run from the botmaker umbrella root"
@@ -216,15 +228,18 @@ wait_for_jitpack() {
 [[ -n "$SHARED_SPEC" ]] && preflight botmaker-shared
 [[ -n "$SDK_SPEC"    ]] && preflight botmaker-sdk
 [[ -n "$STUDIO_SPEC" ]] && preflight botmaker-studio
+[[ -n "$PILOT_SPEC"  ]] && preflight botmaker-pilot
 
 # ---- resolve specs (explicit or bump level) into concrete versions, then show the plan ----
 [[ -n "$SHARED_SPEC" ]] && SHARED_VER="$(resolve_version botmaker-shared "$SHARED_SPEC")"
 [[ -n "$SDK_SPEC"    ]] && SDK_VER="$(resolve_version botmaker-sdk    "$SDK_SPEC")"
 [[ -n "$STUDIO_SPEC" ]] && STUDIO_VER="$(resolve_version botmaker-studio "$STUDIO_SPEC")"
+[[ -n "$PILOT_SPEC"  ]] && PILOT_VER="$(resolve_version botmaker-pilot  "$PILOT_SPEC")"
 info "Release plan:"
 [[ -n "$SHARED_VER" ]] && echo "    shared : $SHARED_SPEC -> v$SHARED_VER"
 [[ -n "$SDK_VER"    ]] && echo "    sdk    : $SDK_SPEC -> v$SDK_VER"
 [[ -n "$STUDIO_VER" ]] && echo "    studio : $STUDIO_SPEC -> v$STUDIO_VER"
+[[ -n "$PILOT_VER"  ]] && echo "    pilot  : $PILOT_SPEC -> v$PILOT_VER  (tags -> APK GitHub Release)"
 
 # A skipped module has its *_VER cleared, so downstream pom-pins and the pointer commit ignore it.
 
@@ -269,12 +284,26 @@ if [[ -n "$STUDIO_VER" ]]; then
  fi
 fi
 
-# ---- 4) record moved submodule pointers in the umbrella ----
+# ---- 4) pilot ----  (independent: no pom pin, no JitPack; the tag triggers release-apk.yml → APK)
+if [[ -n "$PILOT_VER" ]]; then
+  if should_release botmaker-pilot "$PILOT_SPEC" 0; then
+    info "Releasing botmaker-pilot v$PILOT_VER"
+    # No pom/version edit — pilot isn't a Maven artifact. Pushing the tag fires the GitHub Actions
+    # release-apk.yml, which builds and attaches botpilot.apk to the v$PILOT_VER GitHub Release.
+    commit_tag_push botmaker-pilot "$PILOT_VER" ""
+    info "botmaker-pilot v$PILOT_VER tagged — its CI builds + publishes botpilot.apk to the release."
+  else
+    info "botmaker-pilot: no changes since its latest tag — skipping"; PILOT_VER=""
+  fi
+fi
+
+# ---- 5) record moved submodule pointers in the umbrella ----
 info "Recording submodule pointers in the umbrella"
 POINTERS=""
 [[ -n "$SHARED_VER" ]] && { run git -C "$ROOT" add botmaker-shared; POINTERS+="shared v$SHARED_VER "; }
 [[ -n "$SDK_VER"    ]] && { run git -C "$ROOT" add botmaker-sdk;    POINTERS+="sdk v$SDK_VER ";       }
 [[ -n "$STUDIO_VER" ]] && { run git -C "$ROOT" add botmaker-studio; POINTERS+="studio v$STUDIO_VER "; }
+[[ -n "$PILOT_VER"  ]] && { run git -C "$ROOT" add botmaker-pilot;  POINTERS+="pilot v$PILOT_VER ";   }
 run bash -c "git -C '$ROOT' diff --cached --quiet || git -C '$ROOT' commit -m 'release: ${POINTERS% }'"
 
 info "Done. ${DRY_RUN:+(dry run) }Released: ${POINTERS% }"
