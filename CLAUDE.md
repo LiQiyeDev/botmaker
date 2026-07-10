@@ -56,29 +56,37 @@ downstream, bumps `botmaker.shared.version` in sdk/studio when shared is part of
 Each repo's own CI reacts to the tag (sdk/shared → warm JitPack; studio → build app-images + GitHub Release).
 It does **not** touch any module's own `<version>` — JitPack owns that.
 
-## Local dev — `dev-install.sh` (no tag push)
+## API stability — breakable for now (no external consumers yet)
 
-To test local changes without pushing a git tag (the `~/.m2` local repo is checked before JitPack), run the
-umbrella **`./dev-install.sh`** — it installs both library builds in dependency order. There are also
-per-module scripts:
+**No published bot/project consumes the SDK or shared API yet.** Until one does, treat the `botmaker-sdk`
+`api.*` facades and the `botmaker-shared` `NativeController`/`capture.*` contract as **freely breakable** —
+remove/rename/retype public methods when it makes the API cleaner, without a compatibility shim. (The
+per-module `CLAUDE.md` files carry the same note.) The only cost of a break is the ordered cross-module
+release below (land shared → bump sdk/studio → release). Revisit and reinstate stability discipline once real
+bots ship against a released SDK.
 
-- **`botmaker-shared/dev-install.sh`** — installs shared at `0.0.0-SNAPSHOT` (its groupId already matches
-  JitPack, so no rename needed); that's the version every consumer defaults to via
-  `${botmaker.shared.version}`, so the SDK build, Studio, and bots pick it up immediately.
-- **`botmaker-sdk/dev-install.sh`** — reinstalls shared, then installs the SDK into `~/.m2` under
-  `com.github.LiQiyeDev:botmaker-sdk:local-SNAPSHOT` (a plain `mvn install` would use the wrong
-  `com.botmaker.sdk` coordinate, so a bot wouldn't see it). It also rewrites `botmaker.shared.version` →
-  `0.0.0-SNAPSHOT` in its temp pom (restored on exit), so the local SDK build depends on the **local** shared
-  build above — otherwise, after a release, the committed property pins a real tag (e.g. `v0.0.2`) and your
-  local shared changes would be ignored.
+## Local dev (no tag push)
 
-**Selecting the local SDK build in Studio:** you no longer type the version. Studio scans `~/.m2` for
-locally-installed SDK `*-SNAPSHOT` builds (`MavenService.localSdkVersions()`) and auto-lists them at the top of
-the SDK version dropdown — both in **New Project** and **Project ▸ Manage Libraries** — labeled `(local build)`
-and preselected when present. shared isn't user-selectable (it's a transitive dep of the SDK); the dev-install
-property rewrite is what routes a local SDK build to your local shared.
+The old `dev-install.sh` / `dev-run.sh` scripts were removed. Local library changes propagate through the
+**`~/.m2` local repo, which Maven checks before JitPack** — you just have to (re)install the changed module:
 
-Local-only — users select real released versions and never resolve these. Detail in each module's `CLAUDE.md`.
+- **shared changes:** run `mvn -pl botmaker-shared -am install` (or umbrella `mvn install`) so shared lands at
+  `0.0.0-SNAPSHOT` — the version every consumer defaults to via `${botmaker.shared.version}`. **Do this before
+  launching Studio from IntelliJ:** IntelliJ's `javafx:run` builds the Studio module alone and resolves shared
+  from `~/.m2`, so without a fresh install it silently uses a stale (or missing) shared jar. Tip: add a
+  *Before launch → Run Maven Goal* (`install` on `botmaker-shared`) to the Studio run configuration so it's
+  automatic. Running Studio via the reactor instead — `mvn -pl botmaker-studio -am javafx:run` from the
+  umbrella root — also resolves shared from the sibling module.
+- **SDK changes (for a generated bot):** a plain `mvn install` in `botmaker-sdk` installs under the wrong
+  `com.botmaker.sdk` coordinate, so a bot won't see it. Install it under the JitPack coordinate as a snapshot
+  instead: `mvn -pl botmaker-sdk install -Dbotmaker.shared.version=0.0.0-SNAPSHOT` after setting the SDK's
+  own coordinate/version to `com.github.LiQiyeDev:botmaker-sdk:local-SNAPSHOT` for the build (the removed
+  `dev-install.sh` automated this; do it by hand or reinstate a small script if you iterate on the SDK often).
+
+**Selecting a local SDK build in Studio:** Studio scans `~/.m2` for locally-installed SDK `*-SNAPSHOT` builds
+(`MavenService.localSdkVersions()`) and lists them at the top of the SDK version dropdown (**New Project** and
+**Project ▸ Manage Libraries**), labeled `(local build)` and preselected. shared isn't user-selectable (it's a
+transitive dep of the SDK). Users only ever select real released versions and never resolve these.
 
 ## Working across submodules
 
