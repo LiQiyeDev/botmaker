@@ -77,16 +77,21 @@ The old `dev-install.sh` / `dev-run.sh` scripts were removed. Local library chan
   *Before launch → Run Maven Goal* (`install` on `botmaker-shared`) to the Studio run configuration so it's
   automatic. Running Studio via the reactor instead — `mvn -pl botmaker-studio -am javafx:run` from the
   umbrella root — also resolves shared from the sibling module.
-- **SDK changes (for a generated bot):** a plain `mvn install` in `botmaker-sdk` installs under the wrong
-  `com.botmaker.sdk` coordinate, so a bot won't see it. Install it under the JitPack coordinate as a snapshot
-  instead: `mvn -pl botmaker-sdk install -Dbotmaker.shared.version=0.0.0-SNAPSHOT` after setting the SDK's
-  own coordinate/version to `com.github.LiQiyeDev:botmaker-sdk:local-SNAPSHOT` for the build (the removed
-  `dev-install.sh` automated this; do it by hand or reinstate a small script if you iterate on the SDK often).
+- **SDK changes (for a generated bot):** the SDK's pom `groupId` is now `com.github.LiQiyeDev` (matching the
+  JitPack coordinate), so a plain `mvn install` already lands it where a bot resolves — the old `dev-install.sh`
+  / `local-SNAPSHOT` / `-Dbotmaker.shared.version` dance is obsolete. Just run from the umbrella root:
+  `mvn -pl botmaker-sdk -am install`. `-am` builds the reactor dep `shared` first, so both shared **and** the
+  SDK land at `0.0.0-SNAPSHOT` (the version every consumer defaults to), and the installed SDK depends on that
+  local shared. Re-run after each SDK edit; a bot pinned to `0.0.0-SNAPSHOT` picks up the new jar on its next
+  classpath resolve.
 
 **Selecting a local SDK build in Studio:** Studio scans `~/.m2` for locally-installed SDK `*-SNAPSHOT` builds
-(`MavenService.localSdkVersions()`) and lists them at the top of the SDK version dropdown (**New Project** and
-**Project ▸ Manage Libraries**), labeled `(local build)` and preselected. shared isn't user-selectable (it's a
-transitive dep of the SDK). Users only ever select real released versions and never resolve these.
+(`MavenService.localSdkVersions()`, newest first) and lists them at the top of the SDK version dropdown
+(**New Project** and **Project ▸ Manage Libraries**), labeled `(local build)` and **preselected** — so a bot
+created from a dev-run Studio is pinned to your local `0.0.0-SNAPSHOT` automatically. The scan is gated on
+`AppVersion.isDevBuild()` (true only for an IDE/`javafx:run` launch with no jar manifest), so packaged builds
+never surface `~/.m2` snapshots. shared isn't user-selectable (it's a transitive dep of the SDK). Released
+builds' users only ever select real released versions and never resolve these.
 
 ## Working across submodules
 
