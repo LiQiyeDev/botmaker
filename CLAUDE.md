@@ -73,10 +73,14 @@ The old `dev-install.sh` / `dev-run.sh` scripts were removed. Local library chan
 - **shared changes:** run `mvn -pl botmaker-shared -am install` (or umbrella `mvn install`) so shared lands at
   `0.0.0-SNAPSHOT` — the version every consumer defaults to via `${botmaker.shared.version}`. **Do this before
   launching Studio from IntelliJ:** IntelliJ's `javafx:run` builds the Studio module alone and resolves shared
-  from `~/.m2`, so without a fresh install it silently uses a stale (or missing) shared jar. Tip: add a
-  *Before launch → Run Maven Goal* (`install` on `botmaker-shared`) to the Studio run configuration so it's
-  automatic. Running Studio via the reactor instead — `mvn -pl botmaker-studio -am javafx:run` from the
-  umbrella root — also resolves shared from the sibling module.
+  from `~/.m2`, so without a fresh install it silently uses a stale (or missing) shared jar. **Tip — make it
+  automatic with `botmaker-sdk`, not `botmaker-shared`:** add a *Before launch → Run Maven Goal* with the
+  command line `-pl botmaker-sdk -am install` (working dir = umbrella root) to the Studio run configuration.
+  `-am` rebuilds `shared` **and** the SDK, so both land at `0.0.0-SNAPSHOT` on every launch — this covers
+  *both* Studio's own stale-shared problem *and* newly created bots picking up your latest SDK. A goal of just
+  `install` on `botmaker-shared` (a common mistake) refreshes shared but leaves the SDK jar frozen, so bots
+  compile against an old SDK. Running Studio via the reactor instead — `mvn -pl botmaker-studio -am javafx:run`
+  from the umbrella root — also resolves shared from the sibling module (but doesn't rebuild the SDK).
 - **SDK changes (for a generated bot):** the SDK's pom `groupId` is now `com.github.LiQiyeDev` (matching the
   JitPack coordinate), so a plain `mvn install` already lands it where a bot resolves — the old `dev-install.sh`
   / `local-SNAPSHOT` / `-Dbotmaker.shared.version` dance is obsolete. Just run from the umbrella root:
