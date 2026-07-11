@@ -34,6 +34,7 @@
 #   ./release.sh --pilot                         # pilot-only patch bump (tags -> builds + publishes the APK)
 #   ./release.sh --pilot 0.2.0                   # pilot at an explicit version
 #   ./release.sh --all --dry-run                # print everything (incl. computed versions), change nothing
+#   ./release.sh --studio 1.0.18 --force        # release even when the module has no changes since its tag
 #
 # Notes:
 #   * `--all [level]` is shorthand for setting every module (shared/sdk/studio/pilot) to that level
@@ -44,6 +45,10 @@
 #     released when it has real changes, when an explicit version is given, or when an upstream module
 #     in the same run edits its pom (a shared release re-pins sdk/studio; an sdk release bumps studio's
 #     fallback). Tagging is idempotent, so an interrupted release can be re-run safely.
+#   * `--force` overrides the change-detection skip above: every requested module is released even when
+#     its HEAD is byte-identical to its latest tag (e.g. to re-trigger CI after a failed release). Pair it
+#     with an explicit/bumped version that produces a NEW tag — tagging is idempotent, so forcing a module
+#     whose tag already exists still no-ops the tag itself.
 #   * Tags are `v<version>` (matching the existing studio tags; the sdk's bare `1.0.x` tags still work
 #     for JitPack, but we standardise on `v` here — JitPack resolves either).
 #   * When --shared is part of the release, the script waits for shared's JitPack build to go green
@@ -61,6 +66,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SHARED_SPEC="" ; SDK_SPEC="" ; STUDIO_SPEC="" ; PILOT_SPEC=""
 SHARED_VER="" ; SDK_VER="" ; STUDIO_VER="" ; PILOT_VER=""
 DRY_RUN=0
+FORCE=0
 
 die()  { echo "error: $*" >&2; exit 1; }
 info() { echo -e "\033[1;34m==>\033[0m $*"; }
@@ -99,6 +105,7 @@ while [[ $# -gt 0 ]]; do
     --sdk)    take_optional "${2:-}"; SDK_SPEC="$OPT_VAL";    shift "$OPT_SHIFT" ;;
     --studio) take_optional "${2:-}"; STUDIO_SPEC="$OPT_VAL"; shift "$OPT_SHIFT" ;;
     --pilot)  take_optional "${2:-}"; PILOT_SPEC="$OPT_VAL";  shift "$OPT_SHIFT" ;;
+    --force)  FORCE=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage 0 ;;
     *) die "unknown arg: $1 (see --help)" ;;
@@ -189,6 +196,7 @@ has_changes() {
 # only when has_changes says there is something new.
 should_release() {
   local mod="$1" spec="$2" forced="$3"
+  [[ "$FORCE" == "1" ]] && return 0          # --force: release every requested module, changes or not
   [[ "$forced" == "1" ]] && return 0
   [[ "$spec" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && return 0
   has_changes "$mod"
