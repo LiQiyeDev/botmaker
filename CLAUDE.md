@@ -9,7 +9,7 @@ This repo is a Maven **aggregator** (`pom.xml`, `com.botmaker:BotMaker`) over gi
 
 | Submodule | Coordinate (published) | Role |
 |-----------|------------------------|------|
-| `botmaker-shared/` | `com.github.LiQiyeDev:botmaker-shared` | JNA native window plumbing (enumerate/capture/focus/move/input). No JavaFX/OpenCV. |
+| `botmaker-shared/` | `com.github.LiQiyeDev:botmaker-shared` | JNA native window plumbing (enumerate/capture/focus/move/input) + OCR core (`ocr/`, OpenCV+Tess4J), shared by SDK & Studio. No JavaFX. |
 | `botmaker-sdk/`    | `com.github.LiQiyeDev:botmaker-sdk`    | Runtime library that generated bots compile against. Depends on shared. |
 | `botmaker-studio/` | (app, not a library) | JavaFX IDE. Depends on shared. Generates bots + knows the SDK's public API. |
 | `botmaker-gallery/`| — | Data-only submodule (published-bot index). Not in the reactor. |
