@@ -9,7 +9,7 @@ This repo is a Maven **aggregator** (`pom.xml`, `com.botmaker:BotMaker`) over gi
 
 | Submodule | Coordinate (published) | Role |
 |-----------|------------------------|------|
-| `botmaker-shared/` | `com.github.LiQiyeDev:botmaker-shared` | JNA native window plumbing (enumerate/capture/focus/move/input). No JavaFX/OpenCV. |
+| `botmaker-shared/` | `com.github.LiQiyeDev:botmaker-shared` | JNA native window plumbing (enumerate/capture/focus/move/input) + OCR core (`ocr/`, OpenCV+Tess4J), shared by SDK & Studio. No JavaFX. |
 | `botmaker-sdk/`    | `com.github.LiQiyeDev:botmaker-sdk`    | Runtime library that generated bots compile against. Depends on shared. |
 | `botmaker-studio/` | (app, not a library) | JavaFX IDE. Depends on shared. Generates bots + knows the SDK's public API. |
 | `botmaker-gallery/`| — | Data-only submodule (published-bot index). Not in the reactor. |
@@ -102,3 +102,37 @@ builds' users only ever select real released versions and never resolve these.
 Edit code **inside the relevant submodule**, commit there, then bump that submodule's pointer in this umbrella
 repo. Don't vendor one module's sources inside another. Each submodule keeps its own `ROADMAP.md`
 (shared/sdk/studio) — update the one you changed.
+
+## Code style (repo-wide)
+
+Each module's `CLAUDE.md` has the detail; these two apply everywhere and are the ones that decay silently.
+
+**Type a closed set instead of passing a bare `String`.** `PlatformId` (shared) is the worked example: the
+emulator product key was a free-form `String platformId`, so a typo could invent a product and each consumer
+kept its own id→display-name switch — which had already drifted ("MuMu" in Studio vs "MuMu Player" in shared).
+An enum carrying the stable wire `id()` **and** the `displayName()` makes the set closed, exhaustively
+switchable, and single-sourced. Keep the wire id stable if it's ever persisted, and keep the parse total
+(`fromId` → `UNKNOWN`, never throws) so an unrecognised value from a newer config still loads. Counter-example
+worth knowing: an `ActivityName` wrapper in Studio was considered and **rejected** — that identifier crosses
+into generated bot source as a string literal (`Activity.disable("Mining")`) and is resolved through a
+`String`-keyed registry, so a wrapper adds ceremony at a boundary that must be a runtime string anyway.
+
+**A shared type owns the labels, keys and probes its consumers would otherwise each rebuild.** Because shared
+feeds both the SDK and Studio, anything derivable from a shared type belongs there — `EmulatorInstance.identity()`
+(never key a cache on a display name; instances routinely share one), `.brand()`, `PlatformStatus.statusLine()`,
+`WindowsRegistry.firstNonBlank`, `PlatformScan.directory`. Duplicated copies don't stay identical; the naming
+drift above and three different spellings of the same instance key are what prompted this note.
+
+**Warnings baseline.** The IDE warnings come from an IntelliJ inspection profile
+(`.idea/inspectionProfiles/Project_Default_copy.xml`), **not** javac — no pom sets `-Xlint` or `-Werror`, so a
+clean `mvn install` says nothing about them. That profile started as "enable all 467 inspections", which buries
+real findings under style dogma. It is now curated to ~222 enabled / ~245 disabled: **off** are house-style
+opinions (`MagicNumber`, `HardCodedStringLiteral`, `LawOfDemeter`, `FeatureEnvy`, qualification/import-style
+rules that literally contradict each other), size and complexity caps (`CyclomaticComplexity`, `ClassCoupling`,
+`ParametersPerMethod`, …), exception-style rules that fight this codebase's deliberate best-effort
+`catch (Exception)` in discovery/probe paths, and whole domains it doesn't use (JDBC, J2EE, serialization);
+**on** are the ones that find defects — unused symbols, nullability and DFA, resource leaks (`IOResource`,
+`SocketResource`), equality/`hashCode`, switch fall-through, unreachable code, concurrency, the JavaFX
+inspections and `JavadocHtmlLint`. Note `.idea/` is **gitignored**, so the profile itself is not version
+controlled — this paragraph is the reproducible record of the policy. Prefer disabling a noisy inspection over
+contorting code to satisfy it, and say why here.
