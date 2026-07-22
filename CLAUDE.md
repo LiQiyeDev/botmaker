@@ -103,6 +103,15 @@ Edit code **inside the relevant submodule**, commit there, then bump that submod
 repo. Don't vendor one module's sources inside another. Each submodule keeps its own `ROADMAP.md`
 (shared/sdk/studio) — update the one you changed.
 
+## Multi-phase work — stop at each phase boundary
+
+A plan with numbered phases/steps is executed **one phase per turn**. At the end of each phase: commit that
+phase's work, report what landed, and **stop** — do not roll straight into the next one. The maintainer
+compacts the context between phases, so a turn that spans several phases loses the detail the later ones need.
+
+Concretely, per phase: implement → build/test the touched modules → commit inside the submodule(s) → bump the
+umbrella pointer if a submodule moved → summarise → end the turn. Resume from the plan file on the next turn.
+
 ## Code style (repo-wide)
 
 Each module's `CLAUDE.md` has the detail; these two apply everywhere and are the ones that decay silently.
